@@ -1,4 +1,5 @@
 Webpage that lets you read an SRT by pressing spacebar to see the next subtitle. Doesn't do anything else.
+<img width="524" height="505" alt="image" src="https://github.com/user-attachments/assets/f1117879-9337-4ec8-8112-93d8e5a024ca" />
 
 You might want instead:
 - kakiyomi https://github.com/rtr46/kikiyomi which requires adding the audiobook.
