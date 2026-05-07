@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Subtitle Viewer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #111;
+    color: #ddd;
+    font-family: monospace;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #controls {
+    flex-shrink: 0;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    padding: 8px 14px;
+    border-bottom: 1px solid #2a2a2a;
+    flex-wrap: wrap;
+  }
+
+  label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #aaa;
+  }
+
+  select {
+    background: #1a1a1a;
+    color: #ddd;
+    border: 1px solid #444;
+    padding: 3px 7px;
+    font-family: monospace;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  #hint { margin-left: auto; font-size: 11px; color: #444; }
+  #progress { font-size: 11px; color: #555; }
+
+  /* ── DROP ZONE ── */
+  #dropzone {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #drop-inner {
+    border: 2px dashed #444;
+    padding: 40px 60px;
+    text-align: center;
+    color: #666;
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  #drop-inner.over { border-color: #888; color: #aaa; }
+  #dropzone input { display: none; }
+
+  /* ── WALL: horizontal (default) ── */
+  #wall-wrap {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: none;
+    position: relative;
+  }
+
+  #wall {
+    display: flex;
+    flex-direction: column;
+    padding: 16px 24px 24px;
+    gap: 0;
+    min-height: 100%;
+    justify-content: flex-end;
+  }
+
+  /* Using <p> elements as requested */
+  .sub-entry {
+    font-size: 20px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    color: #ddd;
+    padding: 6px 10px;
+    border-top: 1px solid #1e1e1e;
+    width: 100%;
+    visibility: hidden;
+    user-select: none;
+    pointer-events: none;
+    background: transparent;
+  }
+  .sub-entry.revealed {
+    visibility: visible;
+    user-select: auto;
+    pointer-events: auto;
+  }
+  .sub-entry.current {
+    visibility: visible;
+    user-select: auto;
+    pointer-events: auto;
+    background: #1a2a1a;
+  }
+
+  /* ── WALL: vertical ── */
+  body.vertical #wall-wrap {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  body.vertical #wall {
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+    align-items: flex-start;
+    min-height: unset;
+    height: 100%;
+    padding: 12px 16px;
+    width: max-content;
+  }
+
+  body.vertical .sub-entry {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    white-space: normal;
+    width: auto;
+    height: 100%;
+    border-top: none;
+    border-right: 1px solid #1e1e1e;
+    padding: 10px 8px;
+  }
+</style>
+</head>
+<body>
+
+<div id="controls">
+  <label>
+    <input type="checkbox" id="verticalCheck">
+    vertical text
+  </label>
+  <label>
+    font:
+    <select id="fontSelect">
+      <option value="noto">Noto</option>
+      <option value="iming">I. Ming / Seiji</option>
+    </select>
+  </label>
+  <span id="progress"></span>
+  <span id="hint">space → next &nbsp;|&nbsp; shift+space → prev</span>
+</div>
+
+<div id="dropzone">
+  <div id="drop-inner">
+    <input type="file" id="fileInput" accept=".srt,.ass,.ssa">
+    drop .srt or .ass file here<br>or click to browse
+  </div>
+</div>
+
+<div id="wall-wrap">
+  <div id="wall"></div>
+</div>
+
+<script>
+  const dropzone      = document.getElementById('dropzone');
+  const dropInner     = document.getElementById('drop-inner');
+  const fileInput     = document.getElementById('fileInput');
+  const wallWrap      = document.getElementById('wall-wrap');
+  const wall          = document.getElementById('wall');
+  const progress      = document.getElementById('progress');
+  const verticalCheck = document.getElementById('verticalCheck');
+  const fontSelect    = document.getElementById('fontSelect');
+
+  let entries = [];
+  let idx = -1;
+
+  const fonts = {
+    noto:  '"Noto Sans CJK JP", "Noto Sans JP", "Noto Serif CJK JP", "Noto Sans", sans-serif',
+    iming: '"I.Ming", "IMinghei", "Seiji", "HanaMinA", "HanaMin", serif'
+  };
+
+  function applyFont() { wall.style.fontFamily = fonts[fontSelect.value]; }
+  fontSelect.addEventListener('change', applyFont);
+  applyFont();
+
+  verticalCheck.addEventListener('change', () => {
+    document.body.classList.toggle('vertical', verticalCheck.checked);
+    scrollToCurrent();
+  });
+
+  dropInner.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropInner.classList.add('over'); });
+  dropzone.addEventListener('dragleave', () => dropInner.classList.remove('over'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropInner.classList.remove('over');
+    if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) readFile(fileInput.files[0]);
+  });
+
+  function readFile(file) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const text = e.target.result;
+      const subs = file.name.toLowerCase().endsWith('.srt') ? parseSRT(text) : parseASS(text);
+      if (!subs.length) return;
+
+      wall.innerHTML = '';
+      const frag = document.createDocumentFragment();
+      subs.forEach(s => {
+        const el = document.createElement('p'); // Changed to <p>
+        el.className = 'sub-entry';
+        el.innerHTML = s.text; // Preserves <span> tags
+        frag.appendChild(el);
+      });
+      wall.appendChild(frag);
+      entries = Array.from(wall.querySelectorAll('.sub-entry'));
+      idx = -1;
+
+      dropzone.style.display = 'none';
+      wallWrap.style.display = 'block';
+
+      if (document.body.classList.contains('vertical')) measureVerticalWidths();
+
+      advance();
+    };
+    reader.readAsText(file, 'UTF-8');
+  }
+
+  function measureVerticalWidths() {
+    entries.forEach(el => {
+      el.style.visibility = 'visible';
+      el.style.width = 'auto';
+      const w = el.scrollWidth;
+      el.style.visibility = '';
+      el.style.width = w + 'px';
+    });
+  }
+
+  // ── PARSERS ──
+  // Modified to leave HTML/angle-brackets alone
+  function stripASSTags(s) {
+    return s.replace(/\{[^}]*\}/g, '').trim();
+  }
+
+  function parseSRT(text) {
+    return text.replace(/\r\n/g, '\n').split(/\n\n+/).map(b => {
+      const lines = b.trim().split('\n');
+      return lines.length >= 3 ? { text: lines.slice(2).join('\n') } : null;
+    }).filter(Boolean);
+  }
+
+  function parseASS(text) {
+    const lines = text.replace(/\r\n/g, '\n').split('\n');
+    const result = []; let inEvents = false, textIdx = -1;
+    for (const line of lines) {
+      if (line.trim().toLowerCase() === '[events]') { inEvents = true; continue; }
+      if (inEvents && line.startsWith('Format:')) {
+        textIdx = line.replace('Format:', '').split(',').map(s => s.trim().toLowerCase()).indexOf('text');
+        continue;
+      }
+      if (inEvents && line.startsWith('Dialogue:') && textIdx >= 0) {
+        const parts = line.replace('Dialogue:', '').split(',');
+        const clean = stripASSTags(parts.slice(textIdx).join(',')).replace(/\\N/gi, '\n').replace(/\\n/gi, '\n');
+        if (clean) result.push({ text: clean });
+      }
+    }
+    return result;
+  }
+
+  function advance() {
+    if (idx >= entries.length - 1) return;
+    if (idx >= 0) entries[idx].classList.replace('current', 'revealed');
+    idx++;
+    entries[idx].classList.add('revealed', 'current');
+    scrollToCurrent();
+    updateProgress();
+  }
+
+  function retreat() {
+    if (idx <= 0) return;
+    entries[idx].classList.remove('revealed', 'current');
+    idx--;
+    entries[idx].classList.add('current');
+    entries[idx].classList.remove('revealed');
+    scrollToCurrent();
+    updateProgress();
+  }
+
+  function scrollToCurrent() {
+    if (idx < 0 || !entries[idx]) return;
+    const vertical = document.body.classList.contains('vertical');
+    entries[idx].scrollIntoView({
+      block: 'nearest',
+      inline: vertical ? 'start' : 'nearest'
+    });
+  }
+
+  function updateProgress() {
+    progress.textContent = `${idx + 1} / ${entries.length}`;
+  }
+
+  document.addEventListener('keydown', e => {
+    if (!entries.length) return;
+    if (e.code === 'Space') {
+      e.preventDefault();
+      e.shiftKey ? retreat() : advance();
+    }
+  });
+</script>
+</body>
+</html>
